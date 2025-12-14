@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Roue de la Fortune</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+body {
+  margin: 0;
+  font-family: Poppins, sans-serif;
+  background: radial-gradient(circle at center, #1e1e1e, #000);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+h1 { text-shadow: 0 0 10px gold; }
+
+#wheel-container {
+  position: relative;
+  width: 420px;
+  height: 420px;
+}
+
+#pointer {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 18px solid transparent;
+  border-right: 18px solid transparent;
+  border-top: 30px solid gold;
+  z-index: 10;
+}
+
+canvas {
+  border-radius: 50%;
+  box-shadow: 0 0 25px rgba(255,215,0,.4);
+}
+
+button {
+  margin-top: 25px;
+  padding: 12px 35px;
+  font-size: 18px;
+  font-weight: bold;
+  border-radius: 30px;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(45deg, gold, orange);
+}
+
+#result {
+  margin-top: 15px;
+  font-size: 22px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🎡 Roue de la Fortune</h1>
+
+<div id="wheel-container">
+  <div id="pointer"></div>
+  <canvas id="wheel" width="400" height="400"></canvas>
+</div>
+
+<button onclick="spin()">Tourner</button>
+<div id="result"></div>
+
+<script>
+/* ================= CONFIG ================= */
+
+// Distribution équilibrée (somme = 100)
+const segments = [
+  { label: "x0.5", weight: 40 },
+  { label: "x1",   weight: 30 },
+  { label: "x1.5", weight: 15 },
+  { label: "x2",   weight: 10 },
+  { label: "x3",   weight: 4 },
+  { label: "x5",   weight: 1 }
+];
+
+const BIG_WIN_THRESHOLD = 3; // x3 et +
+const PITY_AFTER = 5;        // après 5 mauvais tours
+const PITY_BONUS = 1.5;      // bonus de chance
+
+/* ================= CANVAS ================= */
+
+const canvas = document.getElementById("wheel");
+const ctx = canvas.getContext("2d");
+const W = canvas.width;
+const center = W / 2;
+const radius = W * 0.45;
+const sliceAngle = (Math.PI * 2) / segments.length;
+
+const colors = ["#ff5959","#ff9f43","#feca57","#1dd1a1","#54a0ff","#5f27cd"];
+
+/* ================= STATE ================= */
+
+let rotation = 0;
+let spinning = false;
+let history = [];
+let badStreak = 0;
+
+/* ================= DRAW ================= */
+
+function drawWheel(rot = 0) {
+  ctx.clearRect(0,0,W,W);
+
+  segments.forEach((seg, i) => {
+    const start = i * sliceAngle + rot;
+
+    ctx.beginPath();
+    ctx.moveTo(center, center);
+    ctx.arc(center, center, radius, start, start + sliceAngle);
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(center, center);
+    ctx.rotate(start + sliceAngle / 2);
+    ctx.fillStyle = "#000";
+    ctx.font = "bold 20px Poppins";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(seg.label, radius * 0.65, 0);
+    ctx.restore();
+  });
+}
+
+drawWheel();
+
+/* ================= LOGIQUE ================= */
+
+// Tirage pondéré + pity system + anti-streak
+function weightedPick() {
+  let adjusted = segments.map(s => ({ ...s }));
+
+  // Pity system
+  if (badStreak >= PITY_AFTER) {
+    adjusted.forEach(s => {
+      if (parseFloat(s.label.substring(1)) >= 1.5) {
+        s.weight *= PITY_BONUS;
+      }
+    });
+  }
+
+  // Anti gros gains consécutifs
+  if (history.at(-1) >= BIG_WIN_THRESHOLD) {
+    adjusted.forEach(s => {
+      if (parseFloat(s.label.substring(1)) >= BIG_WIN_THRESHOLD) {
+        s.weight *= 0.2;
+      }
+    });
+  }
+
+  const total = adjusted.reduce((a,b) => a + b.weight, 0);
+  let r = Math.random() * total;
+
+  for (let i=0; i<adjusted.length; i++) {
+    r -= adjusted[i].weight;
+    if (r <= 0) return i;
+  }
+  return adjusted.length - 1;
+}
+
+/* ================= SPIN ================= */
+
+function spin() {
+  if (spinning) return;
+  spinning = true;
+
+  const winnerIndex = weightedPick();
+  const value = parseFloat(segments[winnerIndex].label.substring(1));
+  history.push(value);
+
+  if (value < 1) badStreak++;
+  else badStreak = 0;
+
+  const targetAngle =
+    (Math.PI * 1.5) -
+    (winnerIndex * sliceAngle + sliceAngle / 2);
+
+  const spins = 4 * Math.PI * 2;
+  const totalRotation = spins + targetAngle;
+  const duration = 4500;
+  let start = null;
+
+  function easeOut(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function animate(ts) {
+    if (!start) start = ts;
+    const p = Math.min((ts - start) / duration, 1);
+    rotation = totalRotation * easeOut(p);
+    drawWheel(rotation);
+
+    if (p < 1) requestAnimationFrame(animate);
+    else {
+      spinning = false;
+      document.getElementById("result").innerHTML =
+        `✨ Résultat : <b>${segments[winnerIndex].label}</b>`;
+    }
+  }
+  requestAnimationFrame(animate);
+}
+</script>
+
+</body>
+</html>
